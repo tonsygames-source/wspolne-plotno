@@ -5,8 +5,17 @@ Prosta aplikacja do rysowania na jednym wspólnym płótnie, na żywo, dla dwóc
 ## Co potrafi
 
 - wspólne płótno w czasie rzeczywistym (WebSocket), widzicie swoje kreski na bieżąco
+- duże płótno (6000 x 6000 jednostek) z powiększaniem i przesuwaniem
 - 8 kolorów, regulowana grubość, gumka
-- Cofnij (cofa Twoją ostatnią kreskę), Wyczyść (czyści dla obojga), Zapisz jako PNG
+- Cofnij (cofa Twoją ostatnią kreskę), Wyczyść (czyści dla obojga), Zapisz jako PNG (cały rysunek, nie tylko widoczny fragment)
+
+## Sterowanie
+
+- **Rysowanie:** jeden palec (lub rysik / mysz)
+- **Zoom i przesuwanie na telefonie:** dwa palce (rozsuwanie i przesuwanie)
+- **Przesuwanie jednym palcem:** przycisk "Ręka" (kliknij ponownie albo wybierz kolor, żeby wrócić do rysowania)
+- **Na komputerze:** kółko myszy = zoom, prawy lub środkowy przycisk myszy (albo "Ręka") = przesuwanie
+- **Przyciski +, − i "Całość"** w rogu: zoom oraz dopasowanie widoku do całego rysunku
 - rysunek jest zapisany na serwerze, po zamknięciu aplikacji nadal tam jest
 - jeśli zniknie internet, kreski czekają w kolejce i wysyłają się po powrocie połączenia
 - wspólny kod pokoju działa jak hasło, bez kont i logowania
@@ -62,7 +71,6 @@ wrangler.jsonc  konfiguracja Cloudflare
 
 ## Pomysły na później
 
-- przybliżanie i przesuwanie płótna
 - więcej płócien (np. osobny kod na każdy rysunek)
 - czułość na nacisk rysika
 - kursor drugiej osoby na żywo

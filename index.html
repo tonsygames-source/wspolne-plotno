@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#17171b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Płótno">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icon-180.png">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <title>Płótno</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <span id="dot" class="dot" title="połączenie"></span>
+    <span id="who">łączenie…</span>
+    <button id="save" class="ghost">Zapisz</button>
+    <button id="clear" class="ghost danger">Wyczyść</button>
+    <button id="roomBtn" class="ghost">Kod</button>
+  </header>
+
+  <main id="stage">
+    <canvas id="c"></canvas>
+    <div id="zoom">
+      <button id="zin" aria-label="Przybliż">+</button>
+      <button id="zout" aria-label="Oddal">−</button>
+      <button id="zfit" aria-label="Pokaż całość">Całość</button>
+    </div>
+  </main>
+
+  <footer>
+    <div id="colors" class="row"></div>
+    <div class="row">
+      <input id="size" type="range" min="2" max="80" value="8" aria-label="Grubość">
+      <button id="hand" class="tool">Ręka</button>
+      <button id="eraser" class="tool">Gumka</button>
+      <button id="undo" class="tool">Cofnij</button>
+    </div>
+  </footer>
+
+  <div id="join" class="overlay hidden">
+    <form id="joinForm">
+      <h2>Wspólny kod</h2>
+      <p>Wpiszcie ten sam kod na obu telefonach. Wybierzcie coś długiego i trudnego do zgadnięcia, bo kod działa jak hasło.</p>
+      <input id="roomInput" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="np. nasze-plotno-2026-xyz">
+      <button type="submit" class="primary">Wejdź</button>
+      <button type="button" id="shareBtn" class="ghost">Wyślij link z kodem</button>
+      <button type="button" id="closeJoin" class="ghost">Zamknij</button>
+    </form>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
