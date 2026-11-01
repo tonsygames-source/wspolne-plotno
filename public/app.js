@@ -1,6 +1,6 @@
 (() => {
   // Logiczny rozmiar płótna - taki sam na każdym telefonie, więc rysunek wygląda tak samo u obojga.
-  const W = 1200, H = 1600, PAPER = "#fffdf8";
+  const W = 6000, H = 6000, PAPER = "#fffdf8";
   const COLORS = ["#1b1b1f", "#e63946", "#f4a261", "#f2cc3a", "#2a9d5c", "#2f80ed", "#8e5cf5", "#ff7eb6"];
 
   const cv = document.getElementById("c");
