@@ -1,7 +1,7 @@
 (() => {
   // Świat ma stały rozmiar WORLD x WORLD jednostek. Widok (view) to to, co aktualnie widać na ekranie:
   // przesunięcie + powiększenie. Kreski są zapisane we współrzędnych świata, więc u obojga wyglądają tak samo.
-  const WORLD = 10000, PAPER = "#fffdf8", OUTSIDE = "#0f0f12", MAXK = 8;
+  const WORLD = 8000, PAPER = "#fffdf8", OUTSIDE = "#0f0f12", MAXK = 8;
   const COLORS = ["#1b1b1f", "#e63946", "#f4a261", "#f2cc3a", "#2a9d5c", "#2f80ed", "#8e5cf5", "#ff7eb6"];
   const MAX_POINTS = 6000; // dłuższe kreski dzielimy na kawałki
 
