@@ -18,19 +18,27 @@
   <header>
     <span id="dot" class="dot" title="połączenie"></span>
     <span id="who">łączenie…</span>
+    <button id="save" class="ghost">Zapisz</button>
+    <button id="clear" class="ghost danger">Wyczyść</button>
     <button id="roomBtn" class="ghost">Kod</button>
   </header>
 
-  <main id="stage"><canvas id="c"></canvas></main>
+  <main id="stage">
+    <canvas id="c"></canvas>
+    <div id="zoom">
+      <button id="zin" aria-label="Przybliż">+</button>
+      <button id="zout" aria-label="Oddal">−</button>
+      <button id="zfit" aria-label="Pokaż całość">Całość</button>
+    </div>
+  </main>
 
   <footer>
     <div id="colors" class="row"></div>
     <div class="row">
-      <input id="size" type="range" min="2" max="40" value="6" aria-label="Grubość">
+      <input id="size" type="range" min="2" max="80" value="8" aria-label="Grubość">
+      <button id="hand" class="tool">Ręka</button>
       <button id="eraser" class="tool">Gumka</button>
       <button id="undo" class="tool">Cofnij</button>
-      <button id="save" class="tool">Zapisz</button>
-      <button id="clear" class="tool danger">Wyczyść</button>
     </div>
   </footer>
 

@@ -13,25 +13,34 @@ html, body {
   font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   overscroll-behavior: none; overflow: hidden;
   -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none;
 }
 body {
   display: flex; flex-direction: column; height: 100dvh;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 header {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; min-height: 44px;
+  display: flex; align-items: center; gap: 2px;
+  padding: 4px 8px 4px 12px; min-height: 44px;
 }
-#who { flex: 1; color: var(--mut); font-size: 13px; }
-.dot { width: 10px; height: 10px; border-radius: 50%; background: #666; transition: background .2s; }
+#who { flex: 1; color: var(--mut); font-size: 13px; margin-left: 8px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: #666; transition: background .2s; flex: none; }
 .dot.on { background: #4cd98a; }
 
-#stage { flex: 1; min-height: 0; display: grid; place-items: center; padding: 4px 8px; }
-#c {
-  background: #fffdf8; border-radius: 10px;
-  touch-action: none; display: block;
-  box-shadow: 0 2px 16px rgba(0,0,0,.5);
+/* Płótno wypełnia cały obszar; rozmiar ustawia skrypt. */
+#stage { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+#c { position: absolute; left: 0; top: 0; display: block; touch-action: none; cursor: crosshair; }
+
+#zoom {
+  position: absolute; right: 10px; bottom: 10px;
+  display: grid; gap: 6px; justify-items: stretch;
 }
+#zoom button {
+  background: rgba(32,32,38,.92); color: var(--fg);
+  min-width: 44px; height: 44px; padding: 0 10px;
+  font-size: 22px; line-height: 1; box-shadow: 0 2px 8px rgba(0,0,0,.4);
+}
+#zoom #zfit { font-size: 13px; }
 
 footer { background: var(--panel); padding: 8px 10px 10px; display: grid; gap: 8px; }
 .row { display: flex; align-items: center; gap: 6px; }
@@ -45,9 +54,9 @@ footer { background: var(--panel); padding: 8px 10px 10px; display: grid; gap: 8
 button { font: inherit; color: var(--fg); border: 0; border-radius: 10px; }
 .tool { background: #2d2d36; padding: 9px 10px; flex: none; }
 .tool.sel { background: var(--acc); color: #0b0b10; }
-.tool.danger { color: var(--bad); }
-.tool:active, .ghost:active { opacity: .6; }
-.ghost { background: transparent; color: var(--acc); padding: 6px 10px; }
+.tool:active, .ghost:active, #zoom button:active { opacity: .6; }
+.ghost { background: transparent; color: var(--acc); padding: 8px 8px; font-size: 14px; }
+.ghost.danger { color: var(--bad); }
 .primary { background: var(--acc); color: #0b0b10; padding: 12px; font-weight: 600; }
 #size { flex: 1; min-width: 60px; accent-color: var(--acc); }
 

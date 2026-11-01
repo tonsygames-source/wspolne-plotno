@@ -1,5 +1,5 @@
 // Network-first: zawsze świeża wersja, a bez internetu działa to, co już zapisane.
-const CACHE = "plotno-v1";
+const CACHE = "plotno-v2";
 const SHELL = ["/", "/app.js", "/style.css", "/manifest.webmanifest", "/icon.svg", "/icon-192.png"];
 
 self.addEventListener("install", (e) => {
