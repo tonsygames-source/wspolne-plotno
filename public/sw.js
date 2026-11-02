@@ -1,5 +1,5 @@
 // Network-first: zawsze świeża wersja, a bez internetu działa to, co już zapisane.
-const CACHE = "plotno-v2";
+const CACHE = "plotno-v3";
 const SHELL = ["/", "/app.js", "/style.css", "/manifest.webmanifest", "/icon.svg", "/icon-192.png"];
 
 self.addEventListener("install", (e) => {
@@ -17,7 +17,8 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   const url = new URL(req.url);
-  if (req.method !== "GET" || url.origin !== location.origin || url.pathname === "/ws") return;
+  // Zdjęcia i WebSocket: nie ruszamy (zdjęcia cache'uje sama przeglądarka).
+  if (req.method !== "GET" || url.origin !== location.origin || url.pathname === "/ws" || url.pathname === "/img") return;
 
   e.respondWith(
     fetch(req)

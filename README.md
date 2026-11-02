@@ -6,8 +6,12 @@ Prosta aplikacja do rysowania na jednym wspólnym płótnie, na żywo, dla dwóc
 
 - wspólne płótno w czasie rzeczywistym (WebSocket), widzicie swoje kreski na bieżąco
 - duże płótno (6000 x 6000 jednostek) z powiększaniem i przesuwaniem
-- 8 kolorów, regulowana grubość, gumka
+- wstawianie zdjęć: przycisk **Zdjęcie** u góry. Zdjęcie jest zmniejszane (długi bok do 1600 px) i zapisywane na serwerze razem z rysunkiem, więc oboje je widzicie i zostaje na stałe
+- 8 kolorów, regulowana grubość, gumka (ściera tylko kreski, nie zdjęcia)
 - Cofnij (cofa Twoją ostatnią kreskę), Wyczyść (czyści dla obojga), Zapisz jako PNG (cały rysunek, nie tylko widoczny fragment)
+- rysunek jest zapisany na serwerze, po zamknięciu aplikacji nadal tam jest
+- jeśli zniknie internet, kreski czekają w kolejce i wysyłają się po powrocie połączenia
+- wspólny kod pokoju działa jak hasło, bez kont i logowania
 
 ## Sterowanie
 
@@ -15,10 +19,8 @@ Prosta aplikacja do rysowania na jednym wspólnym płótnie, na żywo, dla dwóc
 - **Zoom i przesuwanie na telefonie:** dwa palce (rozsuwanie i przesuwanie)
 - **Przesuwanie jednym palcem:** przycisk "Ręka" (kliknij ponownie albo wybierz kolor, żeby wrócić do rysowania)
 - **Na komputerze:** kółko myszy = zoom, prawy lub środkowy przycisk myszy (albo "Ręka") = przesuwanie
+- **Zdjęcia:** po wstawieniu zdjęcie jest zaznaczone. Przeciągnij je palcem, żeby przesunąć, a kółko w prawym dolnym rogu ramki zmienia rozmiar (proporcje zostają). "Usuń zdjęcie" jest w lewym górnym rogu. Żeby później zaznaczyć inne zdjęcie, wybierz narzędzie **Wybierz** i dotknij go (przeciągnięcie pustego miejsca w tym trybie przesuwa widok). Kreski rysujecie na wierzchu zdjęć.
 - **Przyciski +, − i "Całość"** w rogu: zoom oraz dopasowanie widoku do całego rysunku
-- rysunek jest zapisany na serwerze, po zamknięciu aplikacji nadal tam jest
-- jeśli zniknie internet, kreski czekają w kolejce i wysyłają się po powrocie połączenia
-- wspólny kod pokoju działa jak hasło, bez kont i logowania
 
 ## Uruchomienie lokalnie
 
@@ -59,7 +61,7 @@ Na iOS aplikacja z ekranu głównego ma osobną pamięć niż Safari, więc kod 
 
 ## Prywatność
 
-Każdy, kto zna kod pokoju, widzi i rysuje na waszym płótnie. Wybierzcie długi, trudny do zgadnięcia kod (np. kilka losowych słów). Jeśli chcecie mieć pewność, można dodatkowo zabezpieczyć cały adres przez Cloudflare Access (Zero Trust, darmowe do 50 użytkowników), wtedy wejść mogą tylko wasze dwa adresy e-mail.
+Każdy, kto zna kod pokoju, widzi i rysuje na waszym płótnie, a także widzi zdjęcia. Wybierzcie długi, trudny do zgadnięcia kod (np. kilka losowych słów). Jeśli chcecie mieć pewność, można dodatkowo zabezpieczyć cały adres przez Cloudflare Access (Zero Trust, darmowe do 50 użytkowników), wtedy wejść mogą tylko wasze dwa adresy e-mail.
 
 ## Struktura
 
@@ -68,6 +70,12 @@ src/worker.js   Worker + Durable Object DrawRoom (pokój, zapis kresek)
 public/         aplikacja: index.html, app.js, style.css, manifest, sw.js, ikony
 wrangler.jsonc  konfiguracja Cloudflare
 ```
+
+## Zdjęcia: limity
+
+- Zdjęcia są zapisywane jako JPEG do ok. 1,4 MB (przezroczystość PNG znika, tło robi się białe).
+- Przycisk "Wyczyść" usuwa też wszystkie zdjęcia. Usunięte zdjęcia znikają z serwera.
+- Zdjęcia lądują w pamięci Durable Object (darmowy plan ma 5 GB na całe konto, więc na dwoje wystarczy z dużym zapasem).
 
 ## Pomysły na później
 

@@ -1,13 +1,17 @@
 (() => {
   // Świat ma stały rozmiar WORLD x WORLD jednostek. Widok (view) to to, co aktualnie widać na ekranie:
-  // przesunięcie + powiększenie. Kreski są zapisane we współrzędnych świata, więc u obojga wyglądają tak samo.
-  const WORLD = 8000, PAPER = "#fffdf8", OUTSIDE = "#0f0f12", MAXK = 8;
+  // przesunięcie + powiększenie. Kreski i zdjęcia są zapisane we współrzędnych świata,
+  // więc u obojga wyglądają tak samo.
+  const WORLD = 6000, PAPER = "#fffdf8", OUTSIDE = "#0f0f12", MAXK = 8;
   const COLORS = ["#1b1b1f", "#e63946", "#f4a261", "#f2cc3a", "#2a9d5c", "#2f80ed", "#8e5cf5", "#ff7eb6"];
   const MAX_POINTS = 6000; // dłuższe kreski dzielimy na kawałki
+  const IMG_MAX_SIDE = 1600, IMG_MAX_BYTES = 1_400_000;
 
   const $ = (id) => document.getElementById(id);
   const cv = $("c");
   const ctx = cv.getContext("2d");
+  const layer = document.createElement("canvas"); // warstwa na kreski (gumka ściera tylko je, nie zdjęcia)
+  const lctx = layer.getContext("2d");
   const stage = $("stage");
   const dot = $("dot");
   const who = $("who");
@@ -16,11 +20,15 @@
   const sizeEl = $("size");
   const eraserBtn = $("eraser");
   const handBtn = $("hand");
+  const selBtn = $("sel");
+  const imgbar = $("imgbar");
 
   const me = Math.random().toString(36).slice(2, 8);
   const strokes = new Map(); // id -> {id,u,c,s,e,p:[[x,y],...]}
-  const tool = { color: COLORS[0], eraser: false, pan: false };
-  let room = "";
+  const images = new Map();  // id -> {id,x,y,w,h}
+  const imgEls = new Map();  // id -> HTMLImageElement
+  const tool = { color: COLORS[0], eraser: false, pan: false, sel: false };
+  let room = "", selected = null;
   let ws = null, retry = 0, pingTimer = 0, online = 1;
   const outbox = [];
 
@@ -111,34 +119,80 @@
 
   function allBox() {
     let r = null;
-    for (const st of strokes.values()) {
-      const b = box(st);
-      if (!b) continue;
-      r = r ? [Math.min(r[0], b[0]), Math.min(r[1], b[1]), Math.max(r[2], b[2]), Math.max(r[3], b[3])] : b.slice();
-    }
+    const add = (b) => { r = r ? [Math.min(r[0], b[0]), Math.min(r[1], b[1]), Math.max(r[2], b[2]), Math.max(r[3], b[3])] : b.slice(); };
+    for (const st of strokes.values()) { const b = box(st); if (b) add(b); }
+    for (const m of images.values()) add([m.x, m.y, m.x + m.w, m.y + m.h]);
     return r;
   }
 
   function draw(c, st, from) {
     const p = st.p;
     if (!p.length) return;
+    c.globalCompositeOperation = st.e ? "destination-out" : "source-over";
     c.lineCap = c.lineJoin = "round";
-    c.strokeStyle = c.fillStyle = st.e ? PAPER : st.c;
+    c.strokeStyle = c.fillStyle = st.e ? "#000" : st.c;
     c.lineWidth = st.s;
     if (p.length === 1) {
       c.beginPath();
       c.arc(p[0][0], p[0][1], st.s / 2, 0, Math.PI * 2);
       c.fill();
-      return;
+    } else {
+      const i0 = Math.max(0, from - 1);
+      c.beginPath();
+      c.moveTo(p[i0][0], p[i0][1]);
+      for (let i = i0 + 1; i < p.length; i++) c.lineTo(p[i][0], p[i][1]);
+      c.stroke();
     }
-    const i0 = Math.max(0, from - 1);
-    c.beginPath();
-    c.moveTo(p[i0][0], p[i0][1]);
-    for (let i = i0 + 1; i < p.length; i++) c.lineTo(p[i][0], p[i][1]);
-    c.stroke();
+    c.globalCompositeOperation = "source-over";
+  }
+
+  // Kreska rysowana na żywo prosto na ekranie (gumka wymaga warstwy, więc ona idzie przez pełny redraw).
+  function drawLive(st, from) {
+    if (st.e) return sched();
+    setT(ctx);
+    draw(ctx, st, from);
+  }
+
+  function getImg(m) {
+    let el = imgEls.get(m.id);
+    if (!el) {
+      el = new Image();
+      el.onload = sched;
+      el.onerror = () => setTimeout(() => { if (imgEls.get(m.id) === el) { imgEls.delete(m.id); sched(); } }, 3000);
+      el.src = "/img?room=" + encodeURIComponent(room) + "&id=" + encodeURIComponent(m.id);
+      imgEls.set(m.id, el);
+    }
+    return el;
+  }
+
+  const sortedImages = () => [...images.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+  function drawImages(c) {
+    for (const m of sortedImages()) {
+      const el = getImg(m);
+      if (el.complete && el.naturalWidth) c.drawImage(el, m.x, m.y, m.w, m.h);
+    }
+  }
+
+  function drawStrokes(c, x0, y0, x1, y1) {
+    for (const st of strokes.values()) {
+      const b = box(st);
+      if (!b || b[2] < x0 || b[0] > x1 || b[3] < y0 || b[1] > y1) continue;
+      draw(c, st, 0);
+    }
   }
 
   function redraw() {
+    if (layer.width !== cv.width || layer.height !== cv.height) { layer.width = cv.width; layer.height = cv.height; }
+    const x0 = view.x, y0 = view.y, x1 = view.x + cssW / view.k, y1 = view.y + cssH / view.k;
+
+    // 1) kreski na przezroczystej warstwie
+    lctx.setTransform(1, 0, 0, 1, 0, 0);
+    lctx.clearRect(0, 0, layer.width, layer.height);
+    setT(lctx);
+    drawStrokes(lctx, x0, y0, x1, y1);
+
+    // 2) tło i zdjęcia
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = OUTSIDE;
     ctx.fillRect(0, 0, cv.width, cv.height);
@@ -149,28 +203,141 @@
     ctx.clip();
     ctx.fillStyle = PAPER;
     ctx.fillRect(0, 0, WORLD, WORLD);
-    const x0 = view.x, y0 = view.y, x1 = view.x + cssW / view.k, y1 = view.y + cssH / view.k;
-    for (const st of strokes.values()) {
-      const b = box(st);
-      if (!b || b[2] < x0 || b[0] > x1 || b[3] < y0 || b[1] > y1) continue;
-      draw(ctx, st, 0);
-    }
+    drawImages(ctx);
+
+    // 3) kreski na wierzchu (w granicach płótna)
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(layer, 0, 0);
     ctx.restore();
+
+    // 4) ramka zaznaczonego zdjęcia
+    const m = selected && tool.sel ? images.get(selected) : null;
+    if (m) {
+      setT(ctx);
+      const k = view.k;
+      ctx.lineWidth = 2 / k;
+      ctx.strokeStyle = "#7c9cff";
+      ctx.setLineDash([8 / k, 6 / k]);
+      ctx.strokeRect(m.x, m.y, m.w, m.h);
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(m.x + m.w, m.y + m.h, 14 / k, 0, Math.PI * 2);
+      ctx.fillStyle = "#7c9cff";
+      ctx.fill();
+      ctx.lineWidth = 3 / k;
+      ctx.strokeStyle = "#fff";
+      ctx.stroke();
+    }
   }
+
+  // ---------- zdjęcia ----------
+  function select(id) {
+    selected = id && images.has(id) ? id : null;
+    imgbar.classList.toggle("hidden", !selected || !tool.sel);
+    sched();
+  }
+
+  function hitImage(wx, wy) {
+    const list = sortedImages();
+    for (let i = list.length - 1; i >= 0; i--) {
+      const m = list[i];
+      if (wx >= m.x && wx <= m.x + m.w && wy >= m.y && wy <= m.y + m.h) return m;
+    }
+    return null;
+  }
+
+  // Wczytuje zdjęcie, zmniejsza (długi bok max 1600 px) i zamienia na JPEG, żeby było lekkie.
+  async function prepareImage(file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (!w || !h) throw new Error("pusty obraz");
+      let scale = Math.min(1, IMG_MAX_SIDE / Math.max(w, h));
+      let q = 0.85;
+      for (let i = 0; i < 6; i++) {
+        const c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(w * scale));
+        c.height = Math.max(1, Math.round(h * scale));
+        const g = c.getContext("2d");
+        g.fillStyle = "#fff";
+        g.fillRect(0, 0, c.width, c.height);
+        g.drawImage(img, 0, 0, c.width, c.height);
+        const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", q));
+        if (blob && blob.size <= IMG_MAX_BYTES) return { blob, w: c.width, h: c.height };
+        q = Math.max(0.5, q - 0.1);
+        scale *= 0.85;
+      }
+      throw new Error("zdjęcie za duże");
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  async function addPhoto(file) {
+    if (!room) { alert("Najpierw wpisz kod pokoju"); return; }
+    let prep;
+    try { prep = await prepareImage(file); }
+    catch (err) { alert("Nie udało się wczytać zdjęcia: " + (err && err.message ? err.message : err)); return; }
+
+    const id = newId();
+    try {
+      const res = await fetch("/img?room=" + encodeURIComponent(room) + "&id=" + encodeURIComponent(id), { method: "POST", body: prep.blob });
+      if (!res.ok) throw new Error("serwer odpowiedział " + res.status);
+    } catch (err) {
+      alert("Nie udało się wysłać zdjęcia (czy jest internet?). " + (err && err.message ? err.message : ""));
+      return;
+    }
+
+    // Rozmiar na płótnie: ok. 60% szerokości widoku, środek widoku.
+    const vw = cssW / view.k, vh = cssH / view.k;
+    let w = Math.min(vw * 0.6, vh * 0.6 * (prep.w / prep.h));
+    w = Math.max(60, Math.min(w, WORLD));
+    const h = (w * prep.h) / prep.w;
+    const m = { id, x: Math.round(view.x + vw / 2 - w / 2), y: Math.round(view.y + vh / 2 - h / 2), w: Math.round(w), h: Math.round(h) };
+
+    const el = new Image(); // dla siebie używamy lokalnej kopii, bez ponownego pobierania
+    el.onload = sched;
+    el.src = URL.createObjectURL(prep.blob);
+    imgEls.set(id, el);
+    images.set(id, m);
+    queue({ t: "imgset", img: m });
+    tool.sel = true; tool.pan = false; tool.eraser = false;
+    setMode();
+    select(id);
+  }
+
+  $("photo").onclick = () => $("imgFile").click();
+  $("imgFile").onchange = (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (f) addPhoto(f);
+  };
+
+  $("imgdel").onclick = () => {
+    if (!selected) return;
+    const id = selected;
+    images.delete(id);
+    imgEls.delete(id);
+    select(null);
+    queue({ t: "imgdel", id });
+  };
 
   // ---------- wskaźniki: rysowanie, przesuwanie, pinch ----------
   const ptrs = new Map(); // pointerId -> {x,y} w px ekranu
   let cur = null, curPid = null, pending = [], flushTimer = 0;
-  let gesture = null, panning = null;
+  let gesture = null, panning = null, drag = null, lastMv = 0;
 
   const newId = () => Date.now().toString().padStart(15, "0") + "-" + me + Math.random().toString(36).slice(2, 5);
   const ser = (st) => ({ id: st.id, u: st.u, c: st.c, s: st.s, e: st.e, p: st.p });
   const meta = (st) => ({ id: st.id, u: st.u, c: st.c, s: st.s, e: st.e });
   const clamp = (v) => Math.round(Math.min(WORLD, Math.max(0, v)) * 10) / 10;
 
-  function toWorld(sx, sy) {
-    return [clamp(view.x + sx / view.k), clamp(view.y + sy / view.k)];
-  }
+  const wx = (sx) => view.x + sx / view.k;
+  const wy = (sy) => view.y + sy / view.k;
+  function toWorld(sx, sy) { return [clamp(wx(sx)), clamp(wy(sy))]; }
 
   function flush() {
     if (!cur || !pending.length) return;
@@ -182,7 +349,7 @@
     cur = { id: newId(), u: me, c: tool.color, s: +sizeEl.value, e: tool.eraser, p: [pt] };
     curPid = pid;
     strokes.set(cur.id, cur);
-    draw(ctx, cur, 0);
+    drawLive(cur, 0);
     pending = [pt];
     flushTimer = setInterval(flush, 60);
   }
@@ -206,6 +373,13 @@
     sched();
   }
 
+  function endDrag() {
+    if (!drag) return;
+    const m = images.get(drag.id);
+    drag = null;
+    if (m) queue({ t: "imgset", img: m });
+  }
+
   function pinchState() {
     const [a, b] = [...ptrs.values()];
     return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) || 1 };
@@ -221,17 +395,40 @@
     ptrs.set(e.pointerId, local(e));
     if (ptrs.size === 2) {
       cancelStroke();
+      endDrag();
       panning = null;
       gesture = pinchState();
       return;
     }
     if (ptrs.size > 2) return;
     const p = ptrs.get(e.pointerId);
+
     if (tool.pan || e.button === 1 || e.button === 2) {
       panning = { id: e.pointerId, x: p.x, y: p.y };
-    } else {
-      startStroke(toWorld(p.x, p.y), e.pointerId);
+      return;
     }
+
+    if (tool.sel) {
+      const cur0 = selected && images.get(selected);
+      if (cur0) { // uchwyt zmiany rozmiaru w prawym dolnym rogu
+        const hx = (cur0.x + cur0.w - view.x) * view.k, hy = (cur0.y + cur0.h - view.y) * view.k;
+        if (Math.hypot(p.x - hx, p.y - hy) < 32) {
+          drag = { mode: "resize", id: cur0.id, pid: e.pointerId, ar: cur0.w / cur0.h };
+          return;
+        }
+      }
+      const hit = hitImage(wx(p.x), wy(p.y));
+      if (hit) {
+        select(hit.id);
+        drag = { mode: "move", id: hit.id, pid: e.pointerId, ox: wx(p.x) - hit.x, oy: wy(p.y) - hit.y };
+        return;
+      }
+      select(null);
+      panning = { id: e.pointerId, x: p.x, y: p.y }; // przeciąganie pustego miejsca przesuwa widok
+      return;
+    }
+
+    startStroke(toWorld(p.x, p.y), e.pointerId);
   });
 
   cv.addEventListener("pointermove", (e) => {
@@ -247,6 +444,22 @@
       clampView();
       sched();
       gesture = s;
+      return;
+    }
+
+    if (drag && drag.pid === e.pointerId) {
+      const p = local(e), m = images.get(drag.id);
+      if (!m) { drag = null; return; }
+      if (drag.mode === "move") {
+        m.x = Math.round(wx(p.x) - drag.ox);
+        m.y = Math.round(wy(p.y) - drag.oy);
+      } else {
+        m.w = Math.round(Math.max(40, wx(p.x) - m.x));
+        m.h = Math.round(m.w / drag.ar);
+      }
+      sched();
+      const now = performance.now();
+      if (now - lastMv > 60) { lastMv = now; send({ t: "imgmv", img: m }); }
       return;
     }
 
@@ -271,7 +484,7 @@
         cur.p.push(pt);
         pending.push(pt);
       }
-      if (cur.p.length > from) draw(ctx, cur, from);
+      if (cur.p.length > from) drawLive(cur, from);
       if (cur.p.length >= MAX_POINTS) {
         const last = cur.p[cur.p.length - 1], pid = curPid;
         finishStroke();
@@ -284,6 +497,7 @@
     if (!ptrs.has(e.pointerId)) return;
     ptrs.delete(e.pointerId);
     if (cur && curPid === e.pointerId) finishStroke();
+    if (drag && drag.pid === e.pointerId) endDrag();
     if (panning && panning.id === e.pointerId) panning = null;
     if (ptrs.size < 2) gesture = null;
   }
@@ -306,11 +520,15 @@
   // ---------- narzędzia ----------
   const colorsEl = $("colors");
   function setMode() {
+    if (!tool.sel) selected = null;
+    imgbar.classList.toggle("hidden", !selected || !tool.sel);
     handBtn.classList.toggle("sel", tool.pan);
-    eraserBtn.classList.toggle("sel", tool.eraser && !tool.pan);
-    cv.style.cursor = tool.pan ? "grab" : "crosshair";
+    selBtn.classList.toggle("sel", tool.sel && !tool.pan);
+    eraserBtn.classList.toggle("sel", tool.eraser && !tool.pan && !tool.sel);
+    cv.style.cursor = tool.pan ? "grab" : tool.sel ? "default" : "crosshair";
     colorsEl.querySelectorAll(".sw").forEach((x) =>
-      x.classList.toggle("sel", !tool.pan && !tool.eraser && x.dataset.c === tool.color));
+      x.classList.toggle("sel", !tool.pan && !tool.sel && !tool.eraser && x.dataset.c === tool.color));
+    sched();
   }
 
   COLORS.forEach((c) => {
@@ -319,12 +537,13 @@
     b.dataset.c = c;
     b.style.background = c;
     b.setAttribute("aria-label", "Kolor " + c);
-    b.onclick = () => { tool.color = c; tool.eraser = false; tool.pan = false; setMode(); };
+    b.onclick = () => { tool.color = c; tool.eraser = false; tool.pan = false; tool.sel = false; setMode(); };
     colorsEl.appendChild(b);
   });
 
-  eraserBtn.onclick = () => { tool.eraser = !(tool.eraser && !tool.pan); tool.pan = false; setMode(); };
-  handBtn.onclick = () => { tool.pan = !tool.pan; setMode(); };
+  eraserBtn.onclick = () => { tool.eraser = !(tool.eraser && !tool.pan && !tool.sel); tool.pan = false; tool.sel = false; setMode(); };
+  handBtn.onclick = () => { tool.pan = !tool.pan; if (tool.pan) tool.sel = false; setMode(); };
+  selBtn.onclick = () => { tool.sel = !tool.sel; tool.pan = false; if (tool.sel) tool.eraser = false; setMode(); };
 
   $("undo").onclick = () => {
     const mine = [...strokes.values()].filter((s) => s.u === me);
@@ -336,9 +555,11 @@
   };
 
   $("clear").onclick = () => {
-    if (!confirm("Wyczyścić całe płótno dla Was obojga?")) return;
+    if (!confirm("Wyczyścić całe płótno (rysunek i zdjęcia) dla Was obojga?")) return;
     strokes.clear();
-    sched();
+    images.clear();
+    imgEls.clear();
+    select(null);
     queue({ t: "clear" });
   };
 
@@ -353,14 +574,21 @@
     b = [Math.max(0, b[0] - pad), Math.max(0, b[1] - pad), Math.min(WORLD, b[2] + pad), Math.min(WORLD, b[3] + pad)];
     const w = b[2] - b[0], h = b[3] - b[1];
     const sc = Math.min(2, 4096 / Math.max(w, h));
+    const W = Math.max(1, Math.ceil(w * sc)), H = Math.max(1, Math.ceil(h * sc));
     const oc = document.createElement("canvas");
-    oc.width = Math.max(1, Math.ceil(w * sc));
-    oc.height = Math.max(1, Math.ceil(h * sc));
+    oc.width = W; oc.height = H;
     const c = oc.getContext("2d");
     c.fillStyle = PAPER;
-    c.fillRect(0, 0, oc.width, oc.height);
+    c.fillRect(0, 0, W, H);
     c.setTransform(sc, 0, 0, sc, -b[0] * sc, -b[1] * sc);
-    for (const st of strokes.values()) draw(c, st, 0);
+    drawImages(c);
+    const lc = document.createElement("canvas");
+    lc.width = W; lc.height = H;
+    const l = lc.getContext("2d");
+    l.setTransform(sc, 0, 0, sc, -b[0] * sc, -b[1] * sc);
+    for (const st of strokes.values()) draw(l, st, 0);
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.drawImage(lc, 0, 0);
     oc.toBlob(async (blob) => {
       if (!blob) return;
       const file = new File([blob], "plotno.png", { type: "image/png" });
@@ -391,7 +619,7 @@
     if (ws && ws.readyState === 1) ws.send(JSON.stringify(m));
   }
 
-  // Zmiany trwałe (end/undo/clear) czekają w kolejce, jeśli nie ma połączenia.
+  // Zmiany trwałe (end/undo/clear/imgset/imgdel) czekają w kolejce, jeśli nie ma połączenia.
   function queue(m) {
     if (ws && ws.readyState === 1) send(m);
     else outbox.push(m);
@@ -402,13 +630,21 @@
       case "init": {
         const keep = new Set(outbox.filter((o) => o.t === "end").map((o) => o.stroke.id));
         const localS = [...strokes.values()].filter((s) => keep.has(s.id));
+        const localI = outbox.filter((o) => o.t === "imgset").map((o) => o.img);
+        const delI = outbox.filter((o) => o.t === "imgdel").map((o) => o.id);
         const live = cur;
         strokes.clear();
         for (const s of m.strokes) strokes.set(s.id, s);
         for (const s of localS) strokes.set(s.id, s);
         if (live) strokes.set(live.id, live);
-        sched();
+        images.clear();
+        for (const im of m.images || []) images.set(im.id, im);
+        for (const im of localI) images.set(im.id, im);
+        for (const id of delI) { images.delete(id); imgEls.delete(id); }
+        for (const id of [...imgEls.keys()]) if (!images.has(id)) imgEls.delete(id);
+        select(selected);
         while (outbox.length) send(outbox.shift());
+        sched();
         break;
       }
       case "pts": {
@@ -419,16 +655,31 @@
         }
         const from = st.p.length;
         st.p.push(...m.p);
-        draw(ctx, st, from);
+        drawLive(st, from);
         break;
       }
       case "undo":
         strokes.delete(m.id);
         sched();
         break;
+      case "imgset":
+        images.set(m.img.id, m.img);
+        sched();
+        break;
+      case "imgmv":
+        if (!(drag && drag.id === m.img.id)) { images.set(m.img.id, m.img); sched(); }
+        break;
+      case "imgdel":
+        images.delete(m.id);
+        imgEls.delete(m.id);
+        if (selected === m.id) select(null);
+        sched();
+        break;
       case "clear":
         strokes.clear();
-        sched();
+        images.clear();
+        imgEls.clear();
+        select(null);
         break;
       case "presence":
         online = m.n;
@@ -479,7 +730,7 @@
     room = r;
     try { localStorage.setItem("room", room); } catch {}
     join.classList.add("hidden");
-    if (changed) { strokes.clear(); outbox.length = 0; sched(); }
+    if (changed) { strokes.clear(); images.clear(); imgEls.clear(); outbox.length = 0; select(null); }
     connect();
   }
 

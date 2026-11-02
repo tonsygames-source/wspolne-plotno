@@ -23,7 +23,15 @@ header {
   display: flex; align-items: center; gap: 2px;
   padding: 4px 8px 4px 12px; min-height: 44px;
 }
-#who { flex: 1; color: var(--mut); font-size: 13px; margin-left: 8px; }
+#who { flex: 1; min-width: 0; color: var(--mut); font-size: 13px; margin-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+header .ghost { padding: 8px 6px; white-space: nowrap; flex: none; }
+
+#imgbar { position: absolute; left: 10px; top: 10px; }
+#imgbar.hidden { display: none; }
+#imgbar button {
+  background: rgba(32,32,38,.92); color: var(--bad);
+  height: 44px; padding: 0 14px; box-shadow: 0 2px 8px rgba(0,0,0,.4);
+}
 .dot { width: 10px; height: 10px; border-radius: 50%; background: #666; transition: background .2s; flex: none; }
 .dot.on { background: #4cd98a; }
 
