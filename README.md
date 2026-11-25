@@ -7,7 +7,10 @@ Prosta aplikacja do rysowania na jednym wspólnym płótnie, na żywo, dla dwóc
 - wspólne płótno w czasie rzeczywistym (WebSocket), widzicie swoje kreski na bieżąco
 - duże płótno (6000 x 6000 jednostek) z powiększaniem i przesuwaniem
 - wstawianie zdjęć: przycisk **Zdjęcie** u góry. Zdjęcie jest zmniejszane (długi bok do 1600 px) i zapisywane na serwerze razem z rysunkiem, więc oboje je widzicie i zostaje na stałe
-- 8 kolorów, regulowana grubość, gumka (ściera tylko kreski, nie zdjęcia)
+- 8 kolorów na wierzchu, a po stuknięciu tęczowego kółka pełny wybór koloru: pole nasycenia i jasności, suwak odcienia, wpisywanie kodu hex (np. `#12ab9c`), paleta 54 kolorów i lista ostatnio użytych. Wybrany kolor jest dokładnie ten, który widzisz, i u drugiej osoby wygląda tak samo
+- **Pipeta**: w oknie koloru przycisk "Pipeta", potem dotykasz dowolnego miejsca płótna (kreski albo zdjęcia) i pisak dostaje dokładnie ten kolor
+- ostatnio wybrany kolor jest zapamiętany po zamknięciu aplikacji
+- regulowana grubość, gumka (ściera tylko kreski, nie zdjęcia)
 - Cofnij (cofa Twoją ostatnią kreskę), Wyczyść (czyści dla obojga), Zapisz jako PNG (cały rysunek, nie tylko widoczny fragment)
 - rysunek jest zapisany na serwerze, po zamknięciu aplikacji nadal tam jest
 - jeśli zniknie internet, kreski czekają w kolejce i wysyłają się po powrocie połączenia

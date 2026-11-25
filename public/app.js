@@ -2,7 +2,7 @@
   // Świat ma stały rozmiar WORLD x WORLD jednostek. Widok (view) to to, co aktualnie widać na ekranie:
   // przesunięcie + powiększenie. Kreski i zdjęcia są zapisane we współrzędnych świata,
   // więc u obojga wyglądają tak samo.
-  const WORLD = 9000, PAPER = "#fffdf8", OUTSIDE = "#0f0f12", MAXK = 8;
+  const WORLD = 6000, PAPER = "#fffdf8", OUTSIDE = "#0f0f12", MAXK = 8;
   const COLORS = ["#1b1b1f", "#e63946", "#f4a261", "#f2cc3a", "#2a9d5c", "#2f80ed", "#8e5cf5", "#ff7eb6"];
   const MAX_POINTS = 6000; // dłuższe kreski dzielimy na kawałki
   const IMG_MAX_SIDE = 1600, IMG_MAX_BYTES = 1_400_000;
@@ -27,7 +27,7 @@
   const strokes = new Map(); // id -> {id,u,c,s,e,p:[[x,y],...]}
   const images = new Map();  // id -> {id,x,y,w,h}
   const imgEls = new Map();  // id -> HTMLImageElement
-  const tool = { color: COLORS[0], eraser: false, pan: false, sel: false };
+  const tool = { color: COLORS[0], eraser: false, pan: false, sel: false, pick: false };
   let room = "", selected = null;
   let ws = null, retry = 0, pingTimer = 0, online = 1;
   const outbox = [];
@@ -403,6 +403,8 @@
     if (ptrs.size > 2) return;
     const p = ptrs.get(e.pointerId);
 
+    if (tool.pick) { pickColorAt(p.x, p.y); return; }
+
     if (tool.pan || e.button === 1 || e.button === 2) {
       panning = { id: e.pointerId, x: p.x, y: p.y };
       return;
@@ -526,8 +528,12 @@
     selBtn.classList.toggle("sel", tool.sel && !tool.pan);
     eraserBtn.classList.toggle("sel", tool.eraser && !tool.pan && !tool.sel);
     cv.style.cursor = tool.pan ? "grab" : tool.sel ? "default" : "crosshair";
+    const drawing = !tool.pan && !tool.sel && !tool.eraser && !tool.pick;
+    const isPreset = COLORS.includes(tool.color);
     colorsEl.querySelectorAll(".sw").forEach((x) =>
-      x.classList.toggle("sel", !tool.pan && !tool.sel && !tool.eraser && x.dataset.c === tool.color));
+      x.classList.toggle("sel", drawing && (x === pickBtn ? !isPreset : x.dataset.c === tool.color)));
+    pickBtn.style.setProperty("--cur", tool.color);
+    $("hint").classList.toggle("hidden", !tool.pick);
     sched();
   }
 
@@ -537,13 +543,170 @@
     b.dataset.c = c;
     b.style.background = c;
     b.setAttribute("aria-label", "Kolor " + c);
-    b.onclick = () => { tool.color = c; tool.eraser = false; tool.pan = false; tool.sel = false; setMode(); };
+    b.onclick = () => setColor(c, true);
     colorsEl.appendChild(b);
   });
+
+  // Ostatni przycisk w rzędzie: tęczowe kółko pokazujące aktualny kolor, otwiera pełny wybór koloru.
+  const pickBtn = document.createElement("button");
+  pickBtn.className = "sw pickbtn";
+  pickBtn.setAttribute("aria-label", "Więcej kolorów");
+  pickBtn.onclick = () => openPicker();
+  colorsEl.appendChild(pickBtn);
 
   eraserBtn.onclick = () => { tool.eraser = !(tool.eraser && !tool.pan && !tool.sel); tool.pan = false; tool.sel = false; setMode(); };
   handBtn.onclick = () => { tool.pan = !tool.pan; if (tool.pan) tool.sel = false; setMode(); };
   selBtn.onclick = () => { tool.sel = !tool.sel; tool.pan = false; if (tool.sel) tool.eraser = false; setMode(); };
+
+  // ---------- wybór koloru ----------
+  const hex2rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const rgb2hex = (r, g, b) => "#" + [r, g, b].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("");
+  function hsv2rgb(h, s, v) {
+    const f = (n, k = (n + h / 60) % 6) => v - v * s * Math.max(Math.min(k, 4 - k, 1), 0);
+    return [f(5) * 255, f(3) * 255, f(1) * 255];
+  }
+  function rgb2hsv(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+    let h = 0;
+    if (d) {
+      if (mx === r) h = ((g - b) / d) % 6;
+      else if (mx === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h *= 60;
+      if (h < 0) h += 360;
+    }
+    return [h, mx ? d / mx : 0, mx];
+  }
+  function hsl2hex(h, s, l) {
+    s /= 100; l /= 100;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => { const k = (n + h / 30) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
+    return rgb2hex(f(0) * 255, f(8) * 255, f(4) * 255);
+  }
+  const c01 = (v) => Math.min(1, Math.max(0, v));
+  const HEX_RE = /^#[0-9a-f]{6}$/;
+  const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+
+  // Paleta: rząd odcieni szarości + 5 odcieni jasności dla 9 kolorów.
+  const PALETTE = [
+    ...[100, 85, 70, 55, 40, 25, 15, 8, 0].map((l) => hsl2hex(0, 0, l)),
+    ...[85, 70, 55, 42, 28].flatMap((l) => [0, 25, 48, 90, 150, 190, 225, 270, 320].map((h) => hsl2hex(h, 78, l))),
+  ];
+
+  const picker = $("picker"), psv = $("psv"), psvH = $("psvh"), phue = $("phue"), phueH = $("phueh");
+  const phex = $("phex"), pprev = $("pprev");
+  let hsv = [0, 0, 0], recent = [];
+  try { recent = JSON.parse(lsGet("recent") || "[]").filter((c) => HEX_RE.test(c)).slice(0, 9); } catch {}
+
+  function updatePickerUI(skipHex) {
+    psv.style.background =
+      `linear-gradient(to top, #000, rgba(0,0,0,0)), linear-gradient(to right, #fff, hsl(${hsv[0]}, 100%, 50%))`;
+    psvH.style.left = hsv[1] * 100 + "%";
+    psvH.style.top = (1 - hsv[2]) * 100 + "%";
+    psvH.style.background = tool.color;
+    phueH.style.left = (hsv[0] / 360) * 100 + "%";
+    phueH.style.background = `hsl(${hsv[0]}, 100%, 50%)`;
+    pprev.style.background = tool.color;
+    if (!skipHex) phex.value = tool.color;
+    picker.querySelectorAll(".cell").forEach((x) => x.classList.toggle("sel", x.dataset.c === tool.color));
+  }
+
+  // Ustawia aktualny kolor pisaka i zapamiętuje go. syncHsv=false przy przeciąganiu po polu koloru,
+  // żeby odcień nie "skakał" przy szarościach i czerni.
+  function setColor(hex, syncHsv, skipHex) {
+    hex = hex.toLowerCase();
+    if (!HEX_RE.test(hex)) return;
+    tool.color = hex;
+    tool.eraser = tool.pan = tool.sel = tool.pick = false;
+    if (syncHsv) hsv = rgb2hsv(...hex2rgb(hex));
+    lsSet("color", hex);
+    setMode();
+    updatePickerUI(skipHex);
+  }
+
+  function addRecent(hex) {
+    if (COLORS.includes(hex)) return;
+    recent = [hex, ...recent.filter((c) => c !== hex)].slice(0, 9);
+    lsSet("recent", JSON.stringify(recent));
+    renderGrids();
+  }
+
+  function renderGrid(el, list) {
+    el.textContent = "";
+    for (const c of list) {
+      const b = document.createElement("button");
+      b.className = "cell";
+      b.dataset.c = c;
+      b.style.background = c;
+      b.setAttribute("aria-label", "Kolor " + c);
+      b.onclick = () => setColor(c, true);
+      el.appendChild(b);
+    }
+  }
+  function renderGrids() {
+    renderGrid($("precent"), recent);
+    renderGrid($("ppal"), PALETTE);
+    updatePickerUI(true);
+  }
+
+  function openPicker() {
+    hsv = rgb2hsv(...hex2rgb(tool.color));
+    picker.classList.remove("hidden");
+    updatePickerUI();
+  }
+  function closePicker() {
+    picker.classList.add("hidden");
+    addRecent(tool.color);
+  }
+
+  function dragArea(el, fn) {
+    let on = false;
+    el.addEventListener("pointerdown", (e) => { on = true; el.setPointerCapture(e.pointerId); fn(e); });
+    el.addEventListener("pointermove", (e) => { if (on) fn(e); });
+    const end = () => { on = false; };
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+  }
+  dragArea(psv, (e) => {
+    const r = psv.getBoundingClientRect();
+    hsv[1] = c01((e.clientX - r.left) / r.width);
+    hsv[2] = 1 - c01((e.clientY - r.top) / r.height);
+    setColor(rgb2hex(...hsv2rgb(...hsv)), false);
+  });
+  dragArea(phue, (e) => {
+    const r = phue.getBoundingClientRect();
+    hsv[0] = Math.min(359.99, c01((e.clientX - r.left) / r.width) * 360);
+    setColor(rgb2hex(...hsv2rgb(...hsv)), false);
+  });
+
+  phex.addEventListener("input", () => {
+    let v = phex.value.trim().toLowerCase();
+    if (v && v[0] !== "#") v = "#" + v;
+    if (/^#[0-9a-f]{3}$/.test(v)) v = "#" + [...v.slice(1)].map((x) => x + x).join("");
+    if (HEX_RE.test(v)) setColor(v, true, true);
+  });
+  $("pdone").onclick = closePicker;
+  picker.addEventListener("pointerdown", (e) => { if (e.target === picker) closePicker(); });
+
+  // Pipeta: kolor z dowolnego miejsca płótna (kreska, tło, zdjęcie), dokładnie taki, jaki widzisz.
+  $("peye").onclick = () => {
+    picker.classList.add("hidden");
+    tool.pick = true;
+    tool.eraser = tool.pan = tool.sel = false;
+    setMode();
+  };
+  $("hintx").onclick = () => { tool.pick = false; setMode(); };
+
+  function pickColorAt(sx, sy) {
+    const x = wx(sx), y = wy(sy);
+    if (x < 0 || y < 0 || x > WORLD || y > WORLD) return; // poza płótnem: czekaj na dotknięcie w środku
+    if (raf) { cancelAnimationFrame(raf); raf = 0; redraw(); } // upewnij się, że obraz jest aktualny
+    const d = ctx.getImageData(Math.round(sx * dpr), Math.round(sy * dpr), 1, 1).data;
+    setColor(rgb2hex(d[0], d[1], d[2]), true);
+    addRecent(tool.color);
+  }
 
   $("undo").onclick = () => {
     const mine = [...strokes.values()].filter((s) => s.u === me);
@@ -748,6 +911,10 @@
   };
 
   // ---------- start ----------
+  const savedColor = (lsGet("color") || "").toLowerCase();
+  if (HEX_RE.test(savedColor)) tool.color = savedColor;
+  hsv = rgb2hsv(...hex2rgb(tool.color));
+  renderGrids();
   setMode();
   resize();
   new ResizeObserver(resize).observe(stage);

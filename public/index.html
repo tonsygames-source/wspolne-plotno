@@ -29,6 +29,10 @@
     <div id="imgbar" class="hidden">
       <button id="imgdel">Usuń zdjęcie</button>
     </div>
+    <div id="hint" class="hidden">
+      <span>Dotknij płótna, żeby pobrać kolor</span>
+      <button id="hintx">Anuluj</button>
+    </div>
     <div id="zoom">
       <button id="zin" aria-label="Przybliż">+</button>
       <button id="zout" aria-label="Oddal">−</button>
@@ -40,6 +44,8 @@
     <div id="colors" class="row"></div>
     <div class="row">
       <input id="size" type="range" min="2" max="80" value="8" aria-label="Grubość">
+    </div>
+    <div class="row tools">
       <button id="sel" class="tool">Wybierz</button>
       <button id="hand" class="tool">Ręka</button>
       <button id="eraser" class="tool">Gumka</button>
@@ -48,6 +54,23 @@
   </footer>
 
   <input id="imgFile" type="file" accept="image/*" hidden>
+
+  <div id="picker" class="sheet hidden">
+    <div class="sheetbox">
+      <div class="phead">
+        <span id="pprev" class="pprev"></span>
+        <input id="phex" maxlength="7" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Kod koloru">
+        <button id="peye" class="tool">Pipeta</button>
+        <button id="pdone" class="tool primary-lite">Gotowe</button>
+      </div>
+      <div id="psv" class="psv"><span id="psvh" class="handle"></span></div>
+      <div id="phue" class="phue"><span id="phueh" class="handle"></span></div>
+      <div class="plabel">Ostatnie</div>
+      <div id="precent" class="grid"></div>
+      <div class="plabel">Paleta</div>
+      <div id="ppal" class="grid"></div>
+    </div>
+  </div>
 
   <div id="join" class="overlay hidden">
     <form id="joinForm">

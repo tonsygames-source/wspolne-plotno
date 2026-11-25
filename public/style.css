@@ -50,12 +50,13 @@ header .ghost { padding: 8px 6px; white-space: nowrap; flex: none; }
 }
 #zoom #zfit { font-size: 13px; }
 
-footer { background: var(--panel); padding: 8px 10px 10px; display: grid; gap: 8px; }
-.row { display: flex; align-items: center; gap: 6px; }
+footer { background: var(--panel); padding: 8px 10px 10px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tools .tool { flex: 1; min-width: 0; padding: 10px 2px; font-size: 14px; }
 #colors { justify-content: space-between; }
 .sw {
-  width: 32px; height: 32px; border-radius: 50%; border: 3px solid transparent;
-  padding: 0; flex: none;
+  width: auto; height: auto; flex: 0 1 32px; min-width: 22px; aspect-ratio: 1;
+  border-radius: 50%; border: 3px solid transparent; padding: 0;
 }
 .sw.sel { border-color: var(--fg); }
 
@@ -66,7 +67,7 @@ button { font: inherit; color: var(--fg); border: 0; border-radius: 10px; }
 .ghost { background: transparent; color: var(--acc); padding: 8px 8px; font-size: 14px; }
 .ghost.danger { color: var(--bad); }
 .primary { background: var(--acc); color: #0b0b10; padding: 12px; font-weight: 600; }
-#size { flex: 1; min-width: 60px; accent-color: var(--acc); }
+#size { flex: 1; width: 100%; min-width: 0; margin: 0; accent-color: var(--acc); }
 
 .overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,.7);
@@ -84,3 +85,62 @@ button { font: inherit; color: var(--fg); border: 0; border-radius: 10px; }
   background: var(--bg); color: var(--fg);
   -webkit-user-select: text; user-select: text;
 }
+
+/* ---------- wybór koloru ---------- */
+.pickbtn {
+  background: conic-gradient(#ff3b3b, #ffd23b, #3bff6a, #3bf0ff, #3b4bff, #ff3bf0, #ff3b3b);
+  position: relative;
+}
+.pickbtn::after {
+  content: ""; position: absolute; inset: 5px; border-radius: 50%;
+  background: var(--cur, #000); box-shadow: 0 0 0 1px rgba(0,0,0,.35);
+}
+
+#hint {
+  position: absolute; left: 50%; top: 10px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; white-space: nowrap;
+  background: rgba(32,32,38,.95); padding: 6px 6px 6px 14px; border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.4); font-size: 14px;
+}
+#hint.hidden { display: none; }
+#hint button { background: #2d2d36; padding: 8px 12px; }
+
+.sheet {
+  position: fixed; inset: 0; background: rgba(0,0,0,.55);
+  display: flex; align-items: flex-end; justify-content: center; z-index: 5;
+}
+.sheet.hidden { display: none; }
+.sheetbox {
+  background: var(--panel); width: min(480px, 100%); max-height: 92dvh; overflow-y: auto;
+  border-radius: 18px 18px 0 0; padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px;
+}
+.phead { display: flex; align-items: center; gap: 8px; }
+.pprev { width: 40px; height: 40px; border-radius: 10px; border: 2px solid rgba(255,255,255,.25); flex: none; }
+#phex {
+  flex: 1; min-width: 0; font: inherit; font-family: ui-monospace, Menlo, Consolas, monospace;
+  padding: 10px; border-radius: 10px; border: 1px solid #3a3a44; background: var(--bg); color: var(--fg);
+  -webkit-user-select: text; user-select: text;
+}
+.primary-lite { background: var(--acc); color: #0b0b10; font-weight: 600; }
+
+.psv, .phue { position: relative; touch-action: none; border-radius: 12px; cursor: crosshair; }
+.psv { height: 190px; }
+.phue {
+  height: 28px;
+  background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+}
+.handle {
+  position: absolute; width: 26px; height: 26px; border-radius: 50%;
+  transform: translate(-50%, -50%); pointer-events: none;
+  border: 3px solid #fff; box-shadow: 0 0 0 1.5px rgba(0,0,0,.55), 0 1px 4px rgba(0,0,0,.5);
+}
+.phue .handle { top: 50%; }
+
+.plabel { color: var(--mut); font-size: 12px; margin-bottom: -6px; }
+.grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 6px; }
+.cell {
+  aspect-ratio: 1; border-radius: 8px; border: 1px solid rgba(255,255,255,.18); padding: 0; min-width: 0;
+}
+.cell.sel { outline: 3px solid #fff; outline-offset: 1px; }
+.grid:empty::before { content: "tu pojawią się kolory, których użyjesz"; color: var(--mut); font-size: 12px; grid-column: 1 / -1; }
