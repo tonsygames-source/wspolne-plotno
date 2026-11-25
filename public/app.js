@@ -2,7 +2,7 @@
   // Świat ma stały rozmiar WORLD x WORLD jednostek. Widok (view) to to, co aktualnie widać na ekranie:
   // przesunięcie + powiększenie. Kreski i zdjęcia są zapisane we współrzędnych świata,
   // więc u obojga wyglądają tak samo.
-  const WORLD = 12000, PAPER = "#fffdf8", OUTSIDE = "#0f0f12", MAXK = 8;
+  const WORLD = 6000, PAPER = "#fffdf8", OUTSIDE = "#0f0f12", MAXK = 8;
   const COLORS = ["#1b1b1f", "#e63946", "#f4a261", "#f2cc3a", "#2a9d5c", "#2f80ed", "#8e5cf5", "#ff7eb6"];
   const MAX_POINTS = 6000; // dłuższe kreski dzielimy na kawałki
   const IMG_MAX_SIDE = 1600, IMG_MAX_BYTES = 1_400_000;
@@ -28,7 +28,12 @@
   const images = new Map();  // id -> {id,x,y,w,h}
   const imgEls = new Map();  // id -> HTMLImageElement
   const tool = { color: COLORS[0], eraser: false, pan: false, sel: false, pick: false };
-  let room = "", selected = null;
+  let room = "";
+  const selStrokes = new Set(), selImgs = new Set(); // zaznaczone kreski i zdjęcia (po id)
+  let marquee = null;      // prostokąt zaznaczania w trakcie przeciągania
+  let xfd = null;          // trwające przesuwanie / skalowanie zaznaczenia
+  let remoteXf = null;     // przekształcenie wykonywane na żywo przez drugą osobę
+  const undoStack = [];    // moje akcje do cofnięcia: kreska albo przekształcenie
   let ws = null, retry = 0, pingTimer = 0, online = 1;
   const outbox = [];
 
@@ -210,31 +215,250 @@
     ctx.drawImage(layer, 0, 0);
     ctx.restore();
 
-    // 4) ramka zaznaczonego zdjęcia
-    const m = selected && tool.sel ? images.get(selected) : null;
-    if (m) {
+    // 4) ramka zaznaczenia z uchwytami w rogach i prostokąt zaznaczania
+    const sb = tool.sel ? selBox() : null;
+    if (sb || (marquee && marquee.moved)) {
       setT(ctx);
       const k = view.k;
-      ctx.lineWidth = 2 / k;
-      ctx.strokeStyle = "#7c9cff";
-      ctx.setLineDash([8 / k, 6 / k]);
-      ctx.strokeRect(m.x, m.y, m.w, m.h);
-      ctx.setLineDash([]);
-      ctx.beginPath();
-      ctx.arc(m.x + m.w, m.y + m.h, 14 / k, 0, Math.PI * 2);
-      ctx.fillStyle = "#7c9cff";
-      ctx.fill();
-      ctx.lineWidth = 3 / k;
-      ctx.strokeStyle = "#fff";
-      ctx.stroke();
+      if (sb) {
+        ctx.lineWidth = 2 / k;
+        ctx.strokeStyle = "#7c9cff";
+        ctx.setLineDash([8 / k, 6 / k]);
+        ctx.strokeRect(sb[0], sb[1], sb[2] - sb[0], sb[3] - sb[1]);
+        ctx.setLineDash([]);
+        for (const [hx, hy] of [[sb[0], sb[1]], [sb[2], sb[1]], [sb[2], sb[3]], [sb[0], sb[3]]]) {
+          ctx.beginPath();
+          ctx.arc(hx, hy, 12 / k, 0, Math.PI * 2);
+          ctx.fillStyle = "#7c9cff";
+          ctx.fill();
+          ctx.lineWidth = 3 / k;
+          ctx.strokeStyle = "#fff";
+          ctx.stroke();
+        }
+      }
+      if (marquee && marquee.moved) {
+        const mx = Math.min(marquee.x0, marquee.x1), my = Math.min(marquee.y0, marquee.y1);
+        const mw = Math.abs(marquee.x1 - marquee.x0), mh = Math.abs(marquee.y1 - marquee.y0);
+        ctx.fillStyle = "rgba(124,156,255,0.16)";
+        ctx.fillRect(mx, my, mw, mh);
+        ctx.lineWidth = 2 / k;
+        ctx.strokeStyle = "#7c9cff";
+        ctx.setLineDash([8 / k, 6 / k]);
+        ctx.strokeRect(mx, my, mw, mh);
+        ctx.setLineDash([]);
+      }
     }
   }
 
-  // ---------- zdjęcia ----------
-  function select(id) {
-    selected = id && images.has(id) ? id : null;
-    imgbar.classList.toggle("hidden", !selected || !tool.sel);
+  // ---------- zaznaczanie, przesuwanie i skalowanie ----------
+  const r1 = (v) => Math.round(v * 10) / 10;
+  const connected = () => !!(ws && ws.readyState === 1);
+
+  // Ramka zaznaczenia: otoczka widocznych kresek (bez gumki) i zdjęć. null = nic nie zaznaczono.
+  function selBox() {
+    let r = null;
+    const add = (b) => { r = r ? [Math.min(r[0], b[0]), Math.min(r[1], b[1]), Math.max(r[2], b[2]), Math.max(r[3], b[3])] : b.slice(); };
+    for (const id of selStrokes) {
+      const st = strokes.get(id);
+      if (!st || st.e) continue;
+      const b = box(st);
+      if (b) add(b);
+    }
+    for (const id of selImgs) {
+      const m = images.get(id);
+      if (m) add([m.x, m.y, m.x + m.w, m.y + m.h]);
+    }
+    return r;
+  }
+  const hasSel = () => selBox() !== null;
+
+  function updateSelUI() {
+    const has = tool.sel && hasSel();
+    imgbar.classList.toggle("hidden", !has);
+    let txt = "";
+    if (tool.pick) txt = "Dotknij płótna, żeby pobrać kolor";
+    else if (tool.sel && !has && !marquee && !xfd) txt = "Przeciągnij, żeby zaznaczyć obszar";
+    $("hint").classList.toggle("hidden", !txt);
+    if (txt) $("hinttxt").textContent = txt;
+    $("hintx").classList.toggle("hidden", !tool.pick);
+  }
+
+  function setSelection(ids, iids) {
+    selStrokes.clear(); selImgs.clear();
+    for (const i of ids) selStrokes.add(i);
+    for (const i of iids) selImgs.add(i);
+    if (!hasSel()) { selStrokes.clear(); selImgs.clear(); } // same kreski gumki nie tworzą zaznaczenia
+    updateSelUI();
     sched();
+  }
+  const clearSelection = () => setSelection([], []);
+
+  // Po usunięciu czegoś (przez którąkolwiek osobę) wyrzuć z zaznaczenia to, czego już nie ma.
+  function pruneSel() {
+    for (const id of [...selStrokes]) if (!strokes.has(id)) selStrokes.delete(id);
+    for (const id of [...selImgs]) if (!images.has(id)) selImgs.delete(id);
+    if (!hasSel()) { selStrokes.clear(); selImgs.clear(); }
+    updateSelUI();
+  }
+
+  function distSeg(px, py, ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+    let t = l2 ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  }
+
+  // Najwyżej leżąca kreska (bez gumki) pod palcem, z tolerancją ok. 12 px ekranu.
+  function hitStroke(X, Y) {
+    const tol = 12 / view.k;
+    const list = [...strokes.values()];
+    for (let i = list.length - 1; i >= 0; i--) {
+      const st = list[i];
+      if (st.e) continue;
+      const b = box(st);
+      if (!b) continue;
+      const t = tol + st.s / 2;
+      if (X < b[0] - t || X > b[2] + t || Y < b[1] - t || Y > b[3] + t) continue;
+      const p = st.p;
+      if (p.length === 1) { if (Math.hypot(X - p[0][0], Y - p[0][1]) <= t) return st; continue; }
+      for (let j = 1; j < p.length; j++) {
+        if (distSeg(X, Y, p[j - 1][0], p[j - 1][1], p[j][0], p[j][1]) <= t) return st;
+      }
+    }
+    return null;
+  }
+
+  function hitObject(X, Y) {
+    const s = hitStroke(X, Y);
+    if (s) return { kind: "s", id: s.id };
+    const m = hitImage(X, Y);
+    return m ? { kind: "i", id: m.id } : null;
+  }
+
+  // Zaznaczenie prostokątem: bierzemy całe obiekty, których co najmniej połowa leży w prostokącie.
+  function selectArea(x0, y0, x1, y1) {
+    const ids = [], iids = [];
+    for (const st of strokes.values()) {
+      const p = st.p;
+      if (!p.length) continue;
+      const b = box(st);
+      if (b[2] < x0 || b[0] > x1 || b[3] < y0 || b[1] > y1) continue;
+      let inside = 0;
+      for (const q of p) if (q[0] >= x0 && q[0] <= x1 && q[1] >= y0 && q[1] <= y1) inside++;
+      if (inside * 2 >= p.length) ids.push(st.id);
+    }
+    for (const m of images.values()) {
+      const ow = Math.min(x1, m.x + m.w) - Math.max(x0, m.x);
+      const oh = Math.min(y1, m.y + m.h) - Math.max(y0, m.y);
+      if (ow > 0 && oh > 0 && (ow * oh) / (m.w * m.h) >= 0.5) iids.push(m.id);
+    }
+    setSelection(ids, iids);
+  }
+
+  // Przekształcenie x' = (x - ax) * k + ax + dx. Ten sam wzór i zaokrąglanie jest na serwerze (worker.js).
+  function snapshotSel(ids, iids) {
+    const s = new Map(), im = new Map();
+    for (const id of ids) { const st = strokes.get(id); if (st) s.set(id, { p: st.p, s: st.s }); }
+    for (const id of iids) { const m = images.get(id); if (m) im.set(id, { x: m.x, y: m.y, w: m.w, h: m.h }); }
+    return { s, im };
+  }
+
+  function applySnap(base, x) {
+    for (const [id, b] of base.s) {
+      const st = strokes.get(id);
+      if (!st) continue;
+      st.p = b.p.map((q) => [r1((q[0] - x.ax) * x.k + x.ax + x.dx), r1((q[1] - x.ay) * x.k + x.ay + x.dy)]);
+      st.s = Math.max(1, r1(b.s * x.k));
+      boxes.delete(st);
+    }
+    for (const [id, b] of base.im) {
+      const m = images.get(id);
+      if (!m) continue;
+      m.x = r1((b.x - x.ax) * x.k + x.ax + x.dx);
+      m.y = r1((b.y - x.ay) * x.k + x.ay + x.dy);
+      m.w = Math.max(1, r1(b.w * x.k));
+      m.h = Math.max(1, r1(b.h * x.k));
+    }
+    sched();
+  }
+
+  function restoreSnap(base) {
+    for (const [id, b] of base.s) {
+      const st = strokes.get(id);
+      if (st) { st.p = b.p; st.s = b.s; boxes.delete(st); }
+    }
+    for (const [id, b] of base.im) {
+      const m = images.get(id);
+      if (m) { m.x = b.x; m.y = b.y; m.w = b.w; m.h = b.h; }
+    }
+    sched();
+  }
+
+  // Największe skalowanie względem punktu (ax,ay), przy którym ramka nadal mieści się w płótnie.
+  function maxScale(b, ax, ay) {
+    let kmax = Infinity;
+    for (const [lo, hi, a] of [[b[0], b[2], ax], [b[1], b[3], ay]]) {
+      if (hi > a) kmax = Math.min(kmax, (WORLD - a) / (hi - a));
+      if (lo < a) kmax = Math.min(kmax, a / (a - lo));
+    }
+    return Math.max(kmax, 1);
+  }
+
+  const rawK = (X, Y) => ((X - xfd.ax) * xfd.vx + (Y - xfd.ay) * xfd.vy) / (xfd.vx * xfd.vx + xfd.vy * xfd.vy);
+
+  function startXf(mode, corner, pid, p) {
+    if (!connected()) return false; // zmiany idą od razu na serwer, więc bez połączenia ich nie robimy
+    const b = selBox();
+    if (!b) return false;
+    const ids = [...selStrokes].filter((i) => strokes.has(i));
+    const iids = [...selImgs].filter((i) => images.has(i));
+    if (ids.length > 6000) { alert("Zaznaczenie jest za duże (ponad 6000 kresek). Zaznacz mniejszy obszar."); return false; }
+    xfd = { g: newId(), mode, corner, pid, b, ids, iids, base: snapshotSel(ids, iids),
+      ox: wx(p.x), oy: wy(p.y), ax: 0, ay: 0, vx: 1, vy: 1, k: 1, dx: 0, dy: 0, k0: 1, sentStart: false, lastMv: 0 };
+    if (mode === "scale") {
+      const pts = [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]];
+      const a = pts[(corner + 2) % 4], h = pts[corner];
+      xfd.ax = a[0]; xfd.ay = a[1]; xfd.vx = h[0] - a[0]; xfd.vy = h[1] - a[1];
+      xfd.k0 = rawK(wx(p.x), wy(p.y)) || 1; // żeby chwycenie uchwytu nie powodowało skoku
+    }
+    updateSelUI();
+    return true;
+  }
+
+  function moveXf(p) {
+    const X = wx(p.x), Y = wy(p.y), b = xfd.b;
+    if (xfd.mode === "move") {
+      xfd.dx = r1(Math.min(WORLD - b[2], Math.max(-b[0], X - xfd.ox)));
+      xfd.dy = r1(Math.min(WORLD - b[3], Math.max(-b[1], Y - xfd.oy)));
+      xfd.k = 1;
+    } else {
+      const size = Math.max(b[2] - b[0], b[3] - b[1]);
+      let k = rawK(X, Y) / xfd.k0;
+      k = Math.max(Math.max(0.02, 12 / size), k);
+      k = Math.min(maxScale(b, xfd.ax, xfd.ay), k);
+      xfd.k = k; xfd.dx = 0; xfd.dy = 0;
+    }
+    applySnap(xfd.base, xfd);
+    const now = performance.now();
+    if (now - xfd.lastMv > 60) {
+      xfd.lastMv = now;
+      const m = { t: "xfmv", g: xfd.g, k: xfd.k, ax: xfd.ax, ay: xfd.ay, dx: xfd.dx, dy: xfd.dy };
+      if (!xfd.sentStart) { m.ids = xfd.ids; m.iids = xfd.iids; xfd.sentStart = true; } // listę id wysyłamy tylko raz
+      send(m);
+    }
+  }
+
+  function endXf() {
+    const x = xfd;
+    xfd = null;
+    if (!x) return;
+    if (x.k === 1 && x.dx === 0 && x.dy === 0) { restoreSnap(x.base); updateSelUI(); return; }
+    if (!connected()) { restoreSnap(x.base); updateSelUI(); return; } // połączenie zniknęło w trakcie: cofnij lokalnie
+    const msg = { g: x.g, ids: x.ids, iids: x.iids, k: x.k, ax: x.ax, ay: x.ay, dx: x.dx, dy: x.dy };
+    send({ t: "xf", ...msg });
+    undoStack.push({ kind: "x", ...msg });
+    if (undoStack.length > 100) undoStack.shift();
+    updateSelUI();
   }
 
   function hitImage(wx, wy) {
@@ -306,7 +530,7 @@
     queue({ t: "imgset", img: m });
     tool.sel = true; tool.pan = false; tool.eraser = false;
     setMode();
-    select(id);
+    setSelection([], [id]);
   }
 
   $("photo").onclick = () => $("imgFile").click();
@@ -316,19 +540,23 @@
     if (f) addPhoto(f);
   };
 
+  // "Usuń zaznaczone": kreski i zdjęcia naraz.
   $("imgdel").onclick = () => {
-    if (!selected) return;
-    const id = selected;
-    images.delete(id);
-    imgEls.delete(id);
-    select(null);
-    queue({ t: "imgdel", id });
+    if (!hasSel()) return;
+    if (!connected()) { alert("Brak połączenia z serwerem, spróbuj za chwilę."); return; }
+    const ids = [...selStrokes].filter((i) => strokes.has(i));
+    const iids = [...selImgs].filter((i) => images.has(i));
+    if (ids.length > 6000) { alert("Zaznaczenie jest za duże (ponad 6000 kresek). Usuń je w kilku częściach."); return; }
+    for (const i of ids) strokes.delete(i);
+    for (const i of iids) { images.delete(i); imgEls.delete(i); }
+    clearSelection();
+    send({ t: "xdel", ids, iids });
   };
 
   // ---------- wskaźniki: rysowanie, przesuwanie, pinch ----------
   const ptrs = new Map(); // pointerId -> {x,y} w px ekranu
   let cur = null, curPid = null, pending = [], flushTimer = 0;
-  let gesture = null, panning = null, drag = null, lastMv = 0;
+  let gesture = null, panning = null;
 
   const newId = () => Date.now().toString().padStart(15, "0") + "-" + me + Math.random().toString(36).slice(2, 5);
   const ser = (st) => ({ id: st.id, u: st.u, c: st.c, s: st.s, e: st.e, p: st.p });
@@ -359,6 +587,8 @@
     clearInterval(flushTimer);
     flush();
     queue({ t: "end", stroke: ser(cur) });
+    undoStack.push({ kind: "s", id: cur.id });
+    if (undoStack.length > 100) undoStack.shift();
     cur = null; curPid = null; pending = [];
   }
 
@@ -371,13 +601,6 @@
     cur = null; curPid = null; pending = [];
     send({ t: "undo", id });
     sched();
-  }
-
-  function endDrag() {
-    if (!drag) return;
-    const m = images.get(drag.id);
-    drag = null;
-    if (m) queue({ t: "imgset", img: m });
   }
 
   function pinchState() {
@@ -395,7 +618,9 @@
     ptrs.set(e.pointerId, local(e));
     if (ptrs.size === 2) {
       cancelStroke();
-      endDrag();
+      endXf();
+      marquee = null;
+      updateSelUI();
       panning = null;
       gesture = pinchState();
       return;
@@ -411,22 +636,27 @@
     }
 
     if (tool.sel) {
-      const cur0 = selected && images.get(selected);
-      if (cur0) { // uchwyt zmiany rozmiaru w prawym dolnym rogu
-        const hx = (cur0.x + cur0.w - view.x) * view.k, hy = (cur0.y + cur0.h - view.y) * view.k;
-        if (Math.hypot(p.x - hx, p.y - hy) < 32) {
-          drag = { mode: "resize", id: cur0.id, pid: e.pointerId, ar: cur0.w / cur0.h };
-          return;
+      const X = wx(p.x), Y = wy(p.y), b = selBox();
+      if (b) {
+        // uchwyt w rogu ramki = skalowanie, wnętrze ramki = przesuwanie
+        const pts = [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]];
+        for (let i = 0; i < 4; i++) {
+          const hx = (pts[i][0] - view.x) * view.k, hy = (pts[i][1] - view.y) * view.k;
+          if (Math.hypot(p.x - hx, p.y - hy) < 30) { startXf("scale", i, e.pointerId, p); return; }
         }
+        if (X >= b[0] && X <= b[2] && Y >= b[1] && Y <= b[3]) { startXf("move", -1, e.pointerId, p); return; }
       }
-      const hit = hitImage(wx(p.x), wy(p.y));
+      // dotknięcie kreski albo zdjęcia zaznacza je i od razu można nim przesuwać
+      const hit = hitObject(X, Y);
       if (hit) {
-        select(hit.id);
-        drag = { mode: "move", id: hit.id, pid: e.pointerId, ox: wx(p.x) - hit.x, oy: wy(p.y) - hit.y };
+        setSelection(hit.kind === "s" ? [hit.id] : [], hit.kind === "i" ? [hit.id] : []);
+        startXf("move", -1, e.pointerId, p);
         return;
       }
-      select(null);
-      panning = { id: e.pointerId, x: p.x, y: p.y }; // przeciąganie pustego miejsca przesuwa widok
+      // puste miejsce: zaznaczanie prostokątem (samo stuknięcie czyści zaznaczenie)
+      clearSelection();
+      marquee = { pid: e.pointerId, sx: p.x, sy: p.y, x0: X, y0: Y, x1: X, y1: Y, moved: false };
+      updateSelUI();
       return;
     }
 
@@ -449,19 +679,17 @@
       return;
     }
 
-    if (drag && drag.pid === e.pointerId) {
-      const p = local(e), m = images.get(drag.id);
-      if (!m) { drag = null; return; }
-      if (drag.mode === "move") {
-        m.x = Math.round(wx(p.x) - drag.ox);
-        m.y = Math.round(wy(p.y) - drag.oy);
-      } else {
-        m.w = Math.round(Math.max(40, wx(p.x) - m.x));
-        m.h = Math.round(m.w / drag.ar);
-      }
+    if (xfd && xfd.pid === e.pointerId) {
+      moveXf(local(e));
+      return;
+    }
+
+    if (marquee && marquee.pid === e.pointerId) {
+      const p = local(e);
+      marquee.x1 = wx(p.x);
+      marquee.y1 = wy(p.y);
+      if (Math.hypot(p.x - marquee.sx, p.y - marquee.sy) > 6) { marquee.moved = true; updateSelUI(); }
       sched();
-      const now = performance.now();
-      if (now - lastMv > 60) { lastMv = now; send({ t: "imgmv", img: m }); }
       return;
     }
 
@@ -499,7 +727,14 @@
     if (!ptrs.has(e.pointerId)) return;
     ptrs.delete(e.pointerId);
     if (cur && curPid === e.pointerId) finishStroke();
-    if (drag && drag.pid === e.pointerId) endDrag();
+    if (xfd && xfd.pid === e.pointerId) endXf();
+    if (marquee && marquee.pid === e.pointerId) {
+      const mq = marquee;
+      marquee = null;
+      if (mq.moved) selectArea(Math.min(mq.x0, mq.x1), Math.min(mq.y0, mq.y1), Math.max(mq.x0, mq.x1), Math.max(mq.y0, mq.y1));
+      updateSelUI();
+      sched();
+    }
     if (panning && panning.id === e.pointerId) panning = null;
     if (ptrs.size < 2) gesture = null;
   }
@@ -522,8 +757,7 @@
   // ---------- narzędzia ----------
   const colorsEl = $("colors");
   function setMode() {
-    if (!tool.sel) selected = null;
-    imgbar.classList.toggle("hidden", !selected || !tool.sel);
+    if (!tool.sel) { selStrokes.clear(); selImgs.clear(); marquee = null; }
     handBtn.classList.toggle("sel", tool.pan);
     selBtn.classList.toggle("sel", tool.sel && !tool.pan);
     eraserBtn.classList.toggle("sel", tool.eraser && !tool.pan && !tool.sel);
@@ -533,7 +767,7 @@
     colorsEl.querySelectorAll(".sw").forEach((x) =>
       x.classList.toggle("sel", drawing && (x === pickBtn ? !isPreset : x.dataset.c === tool.color)));
     pickBtn.style.setProperty("--cur", tool.color);
-    $("hint").classList.toggle("hidden", !tool.pick);
+    updateSelUI();
     sched();
   }
 
@@ -708,13 +942,28 @@
     addRecent(tool.color);
   }
 
+  // Cofnij: ostatnia moja akcja, czyli narysowana kreska (znika) albo przesunięcie/skalowanie (wraca).
   $("undo").onclick = () => {
-    const mine = [...strokes.values()].filter((s) => s.u === me);
-    const last = mine[mine.length - 1];
-    if (!last) return;
-    strokes.delete(last.id);
-    sched();
-    queue({ t: "undo", id: last.id });
+    while (undoStack.length) {
+      const a = undoStack.pop();
+      if (a.kind === "s") {
+        if (!strokes.has(a.id)) continue; // już usunięta przez kogoś
+        strokes.delete(a.id);
+        pruneSel();
+        sched();
+        queue({ t: "undo", id: a.id });
+        return;
+      }
+      const ids = a.ids.filter((i) => strokes.has(i)), iids = a.iids.filter((i) => images.has(i));
+      if (!ids.length && !iids.length) continue;
+      if (!connected()) { undoStack.push(a); alert("Brak połączenia z serwerem, spróbuj za chwilę."); return; }
+      // odwrotność przekształcenia x' = (x - ax) * k + ax + dx
+      const inv = { g: newId(), k: 1 / a.k, ax: a.ax, ay: a.ay, dx: -a.dx / a.k, dy: -a.dy / a.k };
+      applySnap(snapshotSel(ids, iids), inv);
+      send({ t: "xf", ...inv, ids, iids });
+      updateSelUI();
+      return;
+    }
   };
 
   $("clear").onclick = () => {
@@ -722,7 +971,8 @@
     strokes.clear();
     images.clear();
     imgEls.clear();
-    select(null);
+    undoStack.length = 0;
+    clearSelection();
     queue({ t: "clear" });
   };
 
@@ -805,7 +1055,8 @@
         for (const im of localI) images.set(im.id, im);
         for (const id of delI) { images.delete(id); imgEls.delete(id); }
         for (const id of [...imgEls.keys()]) if (!images.has(id)) imgEls.delete(id);
-        select(selected);
+        remoteXf = null;
+        pruneSel();
         while (outbox.length) send(outbox.shift());
         sched();
         break;
@@ -823,6 +1074,7 @@
       }
       case "undo":
         strokes.delete(m.id);
+        pruneSel();
         sched();
         break;
       case "imgset":
@@ -830,19 +1082,40 @@
         sched();
         break;
       case "imgmv":
-        if (!(drag && drag.id === m.img.id)) { images.set(m.img.id, m.img); sched(); }
+        images.set(m.img.id, m.img);
+        sched();
         break;
       case "imgdel":
         images.delete(m.id);
         imgEls.delete(m.id);
-        if (selected === m.id) select(null);
+        pruneSel();
+        sched();
+        break;
+      case "xfmv":
+      case "xf": {
+        // Druga osoba przesuwa/skaluje zaznaczenie: liczymy od stanu z początku jej gestu, tym samym wzorem co serwer.
+        let r = remoteXf;
+        if (!r || r.g !== m.g) {
+          if (m.t === "xfmv" && !m.ids && !m.iids) break; // przegapiliśmy początek gestu
+          const ids = m.ids || [], iids = m.iids || [];
+          r = remoteXf = { g: m.g, base: snapshotSel(ids, iids) };
+        }
+        applySnap(r.base, m);
+        if (m.t === "xf") remoteXf = null;
+        break;
+      }
+      case "xdel":
+        for (const id of m.ids || []) strokes.delete(id);
+        for (const id of m.iids || []) { images.delete(id); imgEls.delete(id); }
+        pruneSel();
         sched();
         break;
       case "clear":
         strokes.clear();
         images.clear();
         imgEls.clear();
-        select(null);
+        undoStack.length = 0;
+        clearSelection();
         break;
       case "presence":
         online = m.n;
@@ -893,7 +1166,7 @@
     room = r;
     try { localStorage.setItem("room", room); } catch {}
     join.classList.add("hidden");
-    if (changed) { strokes.clear(); images.clear(); imgEls.clear(); outbox.length = 0; select(null); }
+    if (changed) { strokes.clear(); images.clear(); imgEls.clear(); outbox.length = 0; undoStack.length = 0; clearSelection(); }
     connect();
   }
 

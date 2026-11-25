@@ -102,7 +102,8 @@ button { font: inherit; color: var(--fg); border: 0; border-radius: 10px; }
   background: rgba(32,32,38,.95); padding: 6px 6px 6px 14px; border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0,0,0,.4); font-size: 14px;
 }
-#hint.hidden { display: none; }
+#hint.hidden, #hint button.hidden { display: none; }
+#hint:has(button.hidden) { padding-right: 14px; }
 #hint button { background: #2d2d36; padding: 8px 12px; }
 
 .sheet {

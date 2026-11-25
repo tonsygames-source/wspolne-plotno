@@ -33,6 +33,50 @@ function cleanImg(m) {
   return { id: String(m.id), x, y, w, h };
 }
 
+// ---- Przekształcenie zaznaczenia (przesunięcie + skalowanie względem punktu) ----
+// x' = (x - ax) * k + ax + dx. Ten sam wzór i to samo zaokrąglanie jest na stronie (app.js),
+// więc serwer i obie osoby dostają identyczny wynik z tego samego stanu wyjściowego.
+const MAX_IDS = 7000;
+const r1 = (v) => Math.round(v * 10) / 10;
+
+function cleanIds(a) {
+  if (!Array.isArray(a) || a.length > MAX_IDS) return null;
+  for (const id of a) if (typeof id !== "string" || !ID_RE.test(id)) return null;
+  return a;
+}
+
+function cleanXf(m) {
+  if (!m || typeof m.g !== "string" || !ID_RE.test(m.g)) return null;
+  const k = num(m.k, 0.01, 100);
+  const ax = num(m.ax, -1e6, 1e6), ay = num(m.ay, -1e6, 1e6);
+  const dx = num(m.dx, -1e6, 1e6), dy = num(m.dy, -1e6, 1e6);
+  if (k === null || ax === null || ay === null || dx === null || dy === null) return null;
+  const out = { g: m.g, k, ax, ay, dx, dy };
+  if (m.ids !== undefined) { out.ids = cleanIds(m.ids); if (!out.ids) return null; }
+  if (m.iids !== undefined) { out.iids = cleanIds(m.iids); if (!out.iids) return null; }
+  return out;
+}
+
+const xfStroke = (st, x) => ({
+  ...st,
+  p: st.p.map((q) => [r1((q[0] - x.ax) * x.k + x.ax + x.dx), r1((q[1] - x.ay) * x.k + x.ay + x.dy)]),
+  s: Math.max(1, r1(st.s * x.k)),
+});
+
+const xfImg = (m, x) => ({
+  id: m.id,
+  x: r1((m.x - x.ax) * x.k + x.ax + x.dx),
+  y: r1((m.y - x.ay) * x.k + x.ay + x.dy),
+  w: Math.max(1, r1(m.w * x.k)),
+  h: Math.max(1, r1(m.h * x.k)),
+});
+
+const chunks = (arr, n = 100) => {
+  const out = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+};
+
 // Jeden pokój = jedno wspólne płótno. Kreski i zdjęcia są zapisywane w storage,
 // więc płótno przetrwa zamknięcie aplikacji i restart.
 export class DrawRoom extends DurableObject {
@@ -134,10 +178,48 @@ export class DrawRoom extends DurableObject {
         }
         break;
 
+      case "xfmv": { // przeciąganie zaznaczenia na żywo: tylko przekaż dalej
+        const x = cleanXf(m);
+        if (x) this.others(ws, JSON.stringify({ t: "xfmv", ...x }));
+        break;
+      }
+
+      case "xf": { // końcowe przekształcenie zaznaczenia: zapisz i przekaż
+        const x = cleanXf(m);
+        if (!x) break;
+        await this.applyXf(x);
+        this.others(ws, JSON.stringify({ t: "xf", ...x }));
+        break;
+      }
+
+      case "xdel": { // usunięcie zaznaczenia (kreski + zdjęcia)
+        const ids = cleanIds(m.ids || []), iids = cleanIds(m.iids || []);
+        if (!ids || !iids) break;
+        for (const part of chunks(ids.map((i) => "s:" + i))) await this.ctx.storage.delete(part);
+        for (const part of chunks(iids.flatMap((i) => ["m:" + i, "b:" + i]))) await this.ctx.storage.delete(part);
+        this.others(ws, JSON.stringify({ t: "xdel", ids, iids }));
+        break;
+      }
+
       case "clear":
         await this.ctx.storage.deleteAll();
         this.others(ws, raw);
         break;
+    }
+  }
+
+  async applyXf(x) {
+    const jobs = [
+      [(x.ids || []).map((i) => "s:" + i), (v) => xfStroke(v, x)],
+      [(x.iids || []).map((i) => "m:" + i), (v) => xfImg(v, x)],
+    ];
+    for (const [keys, fn] of jobs) {
+      for (const part of chunks(keys)) {
+        const got = await this.ctx.storage.get(part);
+        const out = {};
+        for (const [k, v] of got) out[k] = fn(v);
+        if (Object.keys(out).length) await this.ctx.storage.put(out);
+      }
     }
   }
 

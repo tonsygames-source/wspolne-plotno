@@ -11,7 +11,7 @@ Prosta aplikacja do rysowania na jednym wspólnym płótnie, na żywo, dla dwóc
 - **Pipeta**: w oknie koloru przycisk "Pipeta", potem dotykasz dowolnego miejsca płótna (kreski albo zdjęcia) i pisak dostaje dokładnie ten kolor
 - ostatnio wybrany kolor jest zapamiętany po zamknięciu aplikacji
 - regulowana grubość, gumka (ściera tylko kreski, nie zdjęcia)
-- Cofnij (cofa Twoją ostatnią kreskę), Wyczyść (czyści dla obojga), Zapisz jako PNG (cały rysunek, nie tylko widoczny fragment)
+- Cofnij (cofa Twoją ostatnią kreskę albo ostatnie przesunięcie lub skalowanie), Wyczyść (czyści dla obojga), Zapisz jako PNG (cały rysunek, nie tylko widoczny fragment)
 - rysunek jest zapisany na serwerze, po zamknięciu aplikacji nadal tam jest
 - jeśli zniknie internet, kreski czekają w kolejce i wysyłają się po powrocie połączenia
 - wspólny kod pokoju działa jak hasło, bez kont i logowania
@@ -22,7 +22,8 @@ Prosta aplikacja do rysowania na jednym wspólnym płótnie, na żywo, dla dwóc
 - **Zoom i przesuwanie na telefonie:** dwa palce (rozsuwanie i przesuwanie)
 - **Przesuwanie jednym palcem:** przycisk "Ręka" (kliknij ponownie albo wybierz kolor, żeby wrócić do rysowania)
 - **Na komputerze:** kółko myszy = zoom, prawy lub środkowy przycisk myszy (albo "Ręka") = przesuwanie
-- **Zdjęcia:** po wstawieniu zdjęcie jest zaznaczone. Przeciągnij je palcem, żeby przesunąć, a kółko w prawym dolnym rogu ramki zmienia rozmiar (proporcje zostają). "Usuń zdjęcie" jest w lewym górnym rogu. Żeby później zaznaczyć inne zdjęcie, wybierz narzędzie **Wybierz** i dotknij go (przeciągnięcie pustego miejsca w tym trybie przesuwa widok). Kreski rysujecie na wierzchu zdjęć.
+- **Zaznaczanie (przycisk "Zaznacz"):** przeciągnij palcem po pustym miejscu, żeby zaznaczyć prostokątny obszar. Zaznaczają się całe kreski i zdjęcia, których co najmniej połowa leży w prostokącie. Możesz też po prostu dotknąć jednej kreski albo zdjęcia. Wokół zaznaczenia pojawia się ramka: **przeciągnij wnętrze ramki**, żeby przesunąć, albo **kółko w rogu**, żeby przeskalować (proporcje zostają, a grubość kresek rośnie razem z rysunkiem). "Usuń zaznaczone" jest w lewym górnym rogu. Stuknięcie w puste miejsce zdejmuje zaznaczenie. Drugi palec nadal robi zoom.
+- Zdjęcia można zaznaczać i przesuwać tak samo jak kreski, a kreski rysujecie na wierzchu zdjęć.
 - **Przyciski +, − i "Całość"** w rogu: zoom oraz dopasowanie widoku do całego rysunku
 
 ## Uruchomienie lokalnie
@@ -79,6 +80,12 @@ wrangler.jsonc  konfiguracja Cloudflare
 - Zdjęcia są zapisywane jako JPEG do ok. 1,4 MB (przezroczystość PNG znika, tło robi się białe).
 - Przycisk "Wyczyść" usuwa też wszystkie zdjęcia. Usunięte zdjęcia znikają z serwera.
 - Zdjęcia lądują w pamięci Durable Object (darmowy plan ma 5 GB na całe konto, więc na dwoje wystarczy z dużym zapasem).
+
+## Zaznaczanie: ograniczenia
+
+- Zaznaczany jest cały obiekt (kreska, zdjęcie), nie jego wycinek: nie da się przesunąć samej części jednej kreski ani fragmentu zdjęcia.
+- Przesuwanie i skalowanie wymaga połączenia z serwerem (zmiany idą od razu do obojga). Bez internetu zaznaczanie działa, ale przesuwanie już nie.
+- "Usuń zaznaczone" nie ma cofania. "Cofnij" odwraca tylko przesunięcie i skalowanie oraz kreski.
 
 ## Pomysły na później
 

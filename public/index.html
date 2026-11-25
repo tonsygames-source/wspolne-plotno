@@ -27,10 +27,10 @@
   <main id="stage">
     <canvas id="c"></canvas>
     <div id="imgbar" class="hidden">
-      <button id="imgdel">Usuń zdjęcie</button>
+      <button id="imgdel">Usuń zaznaczone</button>
     </div>
     <div id="hint" class="hidden">
-      <span>Dotknij płótna, żeby pobrać kolor</span>
+      <span id="hinttxt">Dotknij płótna, żeby pobrać kolor</span>
       <button id="hintx">Anuluj</button>
     </div>
     <div id="zoom">
@@ -46,7 +46,7 @@
       <input id="size" type="range" min="2" max="80" value="8" aria-label="Grubość">
     </div>
     <div class="row tools">
-      <button id="sel" class="tool">Wybierz</button>
+      <button id="sel" class="tool">Zaznacz</button>
       <button id="hand" class="tool">Ręka</button>
       <button id="eraser" class="tool">Gumka</button>
       <button id="undo" class="tool">Cofnij</button>
